@@ -614,7 +614,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btns.forEach(b => { b.textContent = "Analyzing..."; b.disabled = true; });
 
         localContextArea.style.display = 'block';
-        localContextContent.innerHTML = '<span style="color:var(--text-muted)">Generating epistemological analysis via Qwen3...</span>';
+        localContextContent.innerHTML = '<span style="color:var(--text-muted)">Analyzing local context via Qwen3...</span>';
 
         localContextContent.scrollIntoView({ behavior: 'smooth', block: 'end' });
 
@@ -638,18 +638,40 @@ document.addEventListener('DOMContentLoaded', () => {
                 const ana = data.analysis;
                 let html = "";
 
-                if(ana.implicit_premises && Array.isArray(ana.implicit_premises)) {
-                    html += `<div><strong style="color:var(--text-primary)">1. 暗黙の前提 (Implicit Premises):</strong><ul style="margin-top:0.2rem">`;
-                    ana.implicit_premises.forEach(p => html += `<li>${escapeHTML(p)}</li>`);
-                    html += `</ul></div>`;
-                }
-                if(ana.binary_oppositions && Array.isArray(ana.binary_oppositions)) {
-                    html += `<div style="margin-top:0.8rem"><strong style="color:var(--text-primary)">2. 概念の二項対立 (Binary Oppositions):</strong><ul style="margin-top:0.2rem">`;
-                    ana.binary_oppositions.forEach(p => html += `<li>${escapeHTML(p)}</li>`);
-                    html += `</ul></div>`;
-                }
-                if(ana.emergent_concepts) {
-                    html += `<div style="margin-top:0.8rem"><strong style="color:var(--text-primary)">3. 新しい定義と展望 (Emergent Concepts):</strong><p style="margin-top:0.2rem">${escapeHTML(ana.emergent_concepts)}</p></div>`;
+                const isTask = (ana._category === "task_execution");
+                const badgeHtml = isTask
+                    ? `<div style="margin-bottom:1rem;"><span style="padding: 2px 8px; font-size: 0.7rem; background: rgba(88, 166, 255, 0.2); color: var(--accent); border-radius: 12px; border: 1px solid var(--accent);">🛠️ Task / Prompt Execution</span></div>`
+                    : `<div style="margin-bottom:1rem;"><span style="padding: 2px 8px; font-size: 0.7rem; background: rgba(163, 113, 247, 0.2); color: #a371f7; border-radius: 12px; border: 1px solid #a371f7;">🧠 Conceptual Exploration</span></div>`;
+                html += badgeHtml;
+
+                if (isTask) {
+                    if(ana.execution_purpose && Array.isArray(ana.execution_purpose)) {
+                        html += `<div><strong style="color:var(--text-primary)">1. 実行目的と制約 (Execution Purpose):</strong><ul style="margin-top:0.2rem">`;
+                        ana.execution_purpose.forEach(p => html += `<li>${escapeHTML(p)}</li>`);
+                        html += `</ul></div>`;
+                    }
+                    if(ana.structural_approach && Array.isArray(ana.structural_approach)) {
+                        html += `<div style="margin-top:0.8rem"><strong style="color:var(--text-primary)">2. 構造的アプローチ (Structural Approach):</strong><ul style="margin-top:0.2rem">`;
+                        ana.structural_approach.forEach(p => html += `<li>${escapeHTML(p)}</li>`);
+                        html += `</ul></div>`;
+                    }
+                    if(ana.improvement_opportunities) {
+                        html += `<div style="margin-top:0.8rem"><strong style="color:var(--text-primary)">3. 改善の余地 (Improvement Opportunities):</strong><p style="margin-top:0.2rem">${escapeHTML(ana.improvement_opportunities)}</p></div>`;
+                    }
+                } else {
+                    if(ana.implicit_premises && Array.isArray(ana.implicit_premises)) {
+                        html += `<div><strong style="color:var(--text-primary)">1. 暗黙の前提 (Implicit Premises):</strong><ul style="margin-top:0.2rem">`;
+                        ana.implicit_premises.forEach(p => html += `<li>${escapeHTML(p)}</li>`);
+                        html += `</ul></div>`;
+                    }
+                    if(ana.binary_oppositions && Array.isArray(ana.binary_oppositions)) {
+                        html += `<div style="margin-top:0.8rem"><strong style="color:var(--text-primary)">2. 概念の二項対立 (Binary Oppositions):</strong><ul style="margin-top:0.2rem">`;
+                        ana.binary_oppositions.forEach(p => html += `<li>${escapeHTML(p)}</li>`);
+                        html += `</ul></div>`;
+                    }
+                    if(ana.emergent_concepts) {
+                        html += `<div style="margin-top:0.8rem"><strong style="color:var(--text-primary)">3. 新しい定義と展望 (Emergent Concepts):</strong><p style="margin-top:0.2rem">${escapeHTML(ana.emergent_concepts)}</p></div>`;
+                    }
                 }
 
                 localContextContent.innerHTML = html;
