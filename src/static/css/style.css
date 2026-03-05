@@ -409,3 +409,87 @@ body {
     color: rgba(210, 153, 34, 0.9);
     font-weight: 500;
 }
+
+/* Modal Overlay & Container */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(4px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+}
+
+.modal-container {
+    width: 85%;
+    max-width: 1000px;
+    height: 90vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-color);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 1.5rem;
+}
+
+.message-skeleton {
+    min-height: 80px;
+    background: transparent;
+    border: 1px dashed rgba(255, 255, 255, 0.1);
+    margin-bottom: 1rem;
+    border-radius: 8px;
+    padding: 1rem;
+    transition: background 0.2s, border 0.2s;
+}
+
+.message-skeleton.highlighted-anchor {
+    border: 1px solid #a371f7;
+    background: rgba(163, 113, 247, 0.1);
+}
+
+.markdown-body {
+    line-height: 1.5;
+    color: var(--text-primary);
+}
+
+.markdown-body p {
+    margin-bottom: 0.8rem;
+}
+
+.markdown-body pre {
+    background: rgba(0, 0, 0, 0.5);
+    padding: 1rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    border: 1px solid var(--panel-border);
+}
+
+.markdown-body code {
+    font-family: Consolas, monospace;
+    background: rgba(255, 255, 255, 0.1);
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-size: 0.85em;
+}
+
+.context-analyze-btn {
+    margin-top: 0.5rem;
+    background: rgba(163, 113, 247, 0.2);
+    border: 1px solid #a371f7;
+    color: #a371f7;
+    padding: 4px 12px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: all 0.2s;
+}
+
+.context-analyze-btn:hover {
+    background: #a371f7;
+    color: #fff;
+}

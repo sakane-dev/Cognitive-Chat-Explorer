@@ -422,4 +422,243 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (e) { console.error('Error fetching highlights', e); }
     }
+
+    //---------------------------------------------------------
+    // Thread Context Modal & Lazy Rendering
+    //---------------------------------------------------------
+    const threadModal = document.getElementById('threadModal');
+    const closeModalBtn = document.getElementById('closeModalBtn');
+    const modalThreadTitle = document.getElementById('modalThreadTitle');
+    const modalThreadMeta = document.getElementById('modalThreadMeta');
+    const threadContent = document.getElementById('threadContent');
+    const localContextArea = document.getElementById('localContextAnalysisArea');
+    const localContextContent = document.getElementById('localContextAnalysisContent');
+
+    let currentThreadMessages = [];
+    let globalQuery = "";
+
+    closeModalBtn.addEventListener('click', () => {
+        threadModal.style.display = 'none';
+        threadContent.innerHTML = '';
+        localContextArea.style.display = 'none';
+        localContextContent.innerHTML = '';
+    });
+
+    threadModal.addEventListener('click', (e) => {
+        if(e.target === threadModal) {
+            closeModalBtn.click();
+        }
+    });
+
+    // Delegation for clicking message card to open thread modal
+    document.addEventListener('click', async (e) => {
+        const card = e.target.closest('.message-card');
+        if(!card) return;
+        // Ignore if clicking highlight popup or analyze button
+        if(e.target.closest('#highlightPopup') || e.target.closest('.context-analyze-btn')) return;
+
+        const convId = card.dataset.convid;
+        const msgId = card.dataset.msgid;
+        const query = document.getElementById('searchInput').value.trim();
+        globalQuery = query;
+        if(!convId) return;
+
+        openThreadModal(convId, msgId, query);
+    });
+
+    async function openThreadModal(convId, highlightMsgId, query) {
+        threadModal.style.display = 'flex';
+        modalThreadTitle.textContent = "Loading...";
+        modalThreadMeta.textContent = "";
+        threadContent.innerHTML = '<div class="empty-state">Fetching thread context from local db...</div>';
+        localContextArea.style.display = 'none';
+        localContextContent.innerHTML = '';
+        currentThreadMessages = [];
+
+        try {
+            const res = await fetch(`/api/conversations/${convId}?highlight_id=${encodeURIComponent(highlightMsgId)}`);
+            const data = await res.json();
+            if(data.error) {
+                threadContent.innerHTML = `<div style="color:red">Error: ${escapeHTML(data.error)}</div>`;
+                return;
+            }
+
+            const meta = data.meta;
+            const messages = data.messages;
+            currentThreadMessages = messages;
+
+            modalThreadTitle.textContent = meta.title || "Untitled Chat";
+            modalThreadMeta.textContent = `${meta.total_messages} messages | ${new Date(meta.start_time).toLocaleString()} - ${new Date(meta.end_time).toLocaleString()}`;
+
+            threadContent.innerHTML = '';
+
+            // 1. Create Skeletons
+            const skeletons = [];
+            messages.forEach((msg, idx) => {
+                const skel = document.createElement('div');
+                skel.className = 'message-skeleton';
+                skel.dataset.index = idx;
+
+                // スケルトンにプレースホルダーとしての最低高さと、圧縮防止（flex-shrink: 0）を付与
+                skel.style.minHeight = '120px';
+                skel.style.flexShrink = '0';
+                skel.style.marginBottom = '1rem';
+                skel.style.width = '100%';
+
+
+                if(meta.highlight_index !== null && idx === meta.highlight_index) {
+                    skel.classList.add('highlighted-anchor');
+                }
+
+                // Add analyze button
+                if(meta.highlight_index !== null && idx === meta.highlight_index && query) {
+                    const btn = document.createElement('button');
+                    btn.className = 'context-analyze-btn';
+                    btn.innerHTML = '✨ Analyze Local Context <span style="font-size:0.6rem;opacity:0.8;">(LLM)</span>';
+                    btn.onclick = (e) => { e.stopPropagation(); triggerLocalAnalysis(idx, query); };
+                    skel.appendChild(btn);
+                }
+
+                threadContent.appendChild(skel);
+                skeletons.push(skel);
+            });
+
+            // 2. Immediate Parse & Scroll for anchor
+            if(meta.highlight_index !== null && skeletons[meta.highlight_index]) {
+                const anchorSkel = skeletons[meta.highlight_index];
+                parseSkeleton(anchorSkel, messages[meta.highlight_index]);
+                anchorSkel.dataset.parsed = "true";
+                // setTimeout helps browser calculate layout before scrolling
+                setTimeout(() => {
+                    anchorSkel.scrollIntoView({ block: "center" });
+                }, 50);
+            }
+
+            // 3. Intersection Observer (1500px margin for pre-fetching)
+            const io = new IntersectionObserver((entries, observer) => {
+                entries.forEach(entry => {
+                    if(entry.isIntersecting) {
+                        const skel = entry.target;
+                        const idx = parseInt(skel.dataset.index);
+                        if(skel.dataset.parsed !== "true") {
+                            parseSkeleton(skel, messages[idx]);
+                            skel.dataset.parsed = "true";
+                        }
+                    }
+                });
+            }, {
+                root: threadContent,
+                rootMargin: "1500px 0px"
+            });
+
+            skeletons.forEach(skel => io.observe(skel));
+
+        } catch(e) {
+            console.error(e);
+            threadContent.innerHTML = `<div style="color:red">Connection Error</div>`;
+        }
+    }
+
+    function parseSkeleton(skel, msgData) {
+        const btn = skel.querySelector('.context-analyze-btn');
+        skel.innerHTML = '';
+
+        const header = document.createElement('div');
+        header.style.display = 'flex';
+        header.style.justifyContent = 'space-between';
+        header.style.marginBottom = '0.5rem';
+        header.style.fontSize = '0.8rem';
+        header.style.color = 'var(--text-secondary)';
+
+        const role = document.createElement('span');
+        role.className = `role ${msgData.author_role}`;
+        role.textContent = msgData.author_role;
+        if(msgData.author_role === 'user') role.style.color = 'var(--accent)';
+        if(msgData.author_role === 'assistant') role.style.color = '#3fb950';
+
+        const date = document.createElement('span');
+        // * 1000 を追加してミリ秒に変換
+        date.textContent = new Date(msgData.create_time * 1000).toLocaleString();
+
+        header.appendChild(role);
+        header.appendChild(date);
+
+        const content = document.createElement('div');
+        content.className = 'markdown-body';
+        try {
+            content.innerHTML = marked.parse(msgData.content);
+        } catch(e) {
+            content.textContent = msgData.content;
+        }
+
+        skel.appendChild(header);
+        skel.appendChild(content);
+        if(btn) {
+            btn.style.marginTop = '1rem';
+            skel.appendChild(btn);
+        }
+
+        skel.style.border = '1px solid rgba(255,255,255,0.05)';
+        if(skel.classList.contains('highlighted-anchor')) {
+            skel.style.borderLeft = '4px solid #a371f7';
+            skel.style.background = 'rgba(163, 113, 247, 0.05)';
+        } else {
+            skel.style.background = 'rgba(255, 255, 255, 0.02)';
+        }
+    }
+
+    async function triggerLocalAnalysis(anchorIndex, query) {
+        if(!query) return;
+
+        const btns = threadContent.querySelectorAll('.context-analyze-btn');
+        btns.forEach(b => { b.textContent = "Analyzing..."; b.disabled = true; });
+
+        localContextArea.style.display = 'block';
+        localContextContent.innerHTML = '<span style="color:var(--text-muted)">Generating epistemological analysis via Qwen3...</span>';
+
+        localContextContent.scrollIntoView({ behavior: 'smooth', block: 'end' });
+
+        // Retrieve +/- 10 messages from frontend cache (stateless)
+        const start = Math.max(0, anchorIndex - 10);
+        const end = Math.min(currentThreadMessages.length, anchorIndex + 11);
+        const slice = currentThreadMessages.slice(start, end);
+
+        const contextText = slice.map(m => `[${m.author_role}]\n${m.content}`).join("\n\n---\n\n");
+
+        try {
+            const res = await fetch("/api/analyze_local_context", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ query: query, context_text: contextText })
+            });
+            const data = await res.json();
+            if(data.error) {
+                localContextContent.innerHTML = `<span style="color:red">Error: ${escapeHTML(data.error)}</span>`;
+            } else if(data.analysis) {
+                const ana = data.analysis;
+                let html = "";
+
+                if(ana.implicit_premises && Array.isArray(ana.implicit_premises)) {
+                    html += `<div><strong style="color:var(--text-primary)">1. 暗黙の前提 (Implicit Premises):</strong><ul style="margin-top:0.2rem">`;
+                    ana.implicit_premises.forEach(p => html += `<li>${escapeHTML(p)}</li>`);
+                    html += `</ul></div>`;
+                }
+                if(ana.binary_oppositions && Array.isArray(ana.binary_oppositions)) {
+                    html += `<div style="margin-top:0.8rem"><strong style="color:var(--text-primary)">2. 概念の二項対立 (Binary Oppositions):</strong><ul style="margin-top:0.2rem">`;
+                    ana.binary_oppositions.forEach(p => html += `<li>${escapeHTML(p)}</li>`);
+                    html += `</ul></div>`;
+                }
+                if(ana.emergent_concepts) {
+                    html += `<div style="margin-top:0.8rem"><strong style="color:var(--text-primary)">3. 新しい定義と展望 (Emergent Concepts):</strong><p style="margin-top:0.2rem">${escapeHTML(ana.emergent_concepts)}</p></div>`;
+                }
+
+                localContextContent.innerHTML = html;
+            }
+        } catch(e) {
+            console.error(e);
+            localContextContent.innerHTML = `<span style="color:red">Network Error</span>`;
+        } finally {
+            btns.forEach(b => { b.innerHTML = '✨ Re-analyze Local Context <span style="font-size:0.6rem;opacity:0.8;">(LLM)</span>'; b.disabled = false; });
+        }
+    }
 });

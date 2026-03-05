@@ -41,7 +41,7 @@ def load_embeddings():
 load_embeddings()
 
 def get_embedding(text: str) -> np.ndarray:
-    model_name = os.getenv("OLLAMA_EMBED_MODEL", "snowflake-arctic-embed2")
+    model_name = os.getenv("OLLAMA_EMBED_MODEL", "snowflake-arctic-embed2:latest")
     data = json.dumps({"model": model_name, "prompt": text}).encode('utf-8')
     req = urllib.request.Request("http://localhost:11434/api/embeddings", data=data, headers={'Content-Type': 'application/json'})
     try:
@@ -90,6 +90,10 @@ class HighlightRequest(BaseModel):
     message_id: str
     conversation_id: str
     text_content: str
+
+class LocalContextRequest(BaseModel):
+    query: str
+    context_text: str
 
 # 静的ファイルとテンプレート
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
@@ -163,9 +167,8 @@ def semantic_search(q: str = Query(..., description="セマンティック検索
             msg_id = str(embedding_ids[idx])
             sim_score = float(similarities[idx])
 
-            # スコアの足切り: 0.3は非常に低い閾値のため0.6に引き上げる
-            # ベクトルDBが全件収録されるまでの暫定値（意味的に無関係な文章を排除）
-            if sim_score < 0.6:
+            # 足切り閾値を調整: snowflake-arctic-embed2 はスコアが0.4〜0.6台に集まる傾向があるため閾値を0.3に下げる
+            if sim_score < 0.3:
                 continue
 
             row = conn.execute("""
@@ -530,3 +533,119 @@ def get_highlights():
         return {"error": str(e)}
     finally:
         conn.close()
+
+@app.get("/api/conversations/{conversation_id}")
+def get_conversation_detail(conversation_id: str, highlight_id: str = Query(None)):
+    conn = get_db_connection()
+    try:
+        # スレッドの基本メタデータを取得します
+        conv_row = conn.execute("""
+            SELECT id, title, create_time
+            FROM conversations
+            WHERE id = ?
+        """, (conversation_id,)).fetchone()
+
+        if not conv_row:
+            return {"error": "指定されたスレッドが見つかりません。"}
+
+        # メッセージを決定論的に全件抽出します
+        msg_rows = conn.execute("""
+            SELECT id, author_role, content, create_time
+            FROM messages
+            WHERE conversation_id = ?
+            ORDER BY create_time ASC, id ASC
+        """, (conversation_id,)).fetchall()
+
+        messages = [dict(row) for row in msg_rows]
+        total_messages = len(messages)
+
+        # highlight_idが指定されている場合、Python側でインデックスを計算します
+        highlight_index = None
+        if highlight_id:
+            highlight_index = next(
+                (index for (index, d) in enumerate(messages) if d["id"] == highlight_id),
+                None
+            )
+
+        # 時間的コンテキストを抽出します
+        start_time = messages[0]["create_time"] if total_messages > 0 else conv_row["create_time"]
+        end_time = messages[-1]["create_time"] if total_messages > 0 else conv_row["create_time"]
+
+        return {
+            "meta": {
+                "conversation_id": conv_row["id"],
+                "title": conv_row["title"],
+                "create_time": conv_row["create_time"],
+                "start_time": start_time,
+                "end_time": end_time,
+                "total_messages": total_messages,
+                "highlight_index": highlight_index
+            },
+            "messages": messages
+        }
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        conn.close()
+
+@app.post("/api/analyze_local_context")
+def analyze_local_context(req: LocalContextRequest):
+    """
+    ユーザーがオンデマンドでトリガーする、局所的コンテキストの構造化分析エンドポイント。
+    フロントエンドでスライスされた数十件のメッセージ群を受け取り、認識論的分析を行う。
+    """
+    model_name = os.getenv("OLLAMA_MODEL", "qwen3:latest")
+
+    # システムプロンプトの構成
+    system_prompt = """
+あなたは、過去の思考の軌跡から新しい概念やパラダイムの変遷を深く抽出する、高度な「認識論的アナリスト（Epistemological Analyst）」です。
+提供された局所的な文脈（チャット履歴の一部）と、ユーザーが着目した「検索キーワード」に基づいて、以下の3つの観点から厳密な分析を行い、定められたJSON形式の**日本語**で出力してください。
+
+【分析の観点】
+1. 暗黙の前提 (implicit_premises): 議論の中で、あえて語られずに前提とされているパラダイムや条件は何か。
+2. 概念の二項対立 (binary_oppositions): 議論の中で、どのような対立構造が構築され、あるいは解体されようとしているか.
+3. 新しい定義と展望 (emergent_concepts): この対話を通じて、既存の概念に対してどのような新しい定義や差異化が試みられているか、また今後の問いは何か。
+
+【出力フォーマット】（必ず以下のJSONスキーマに従い、余計な文字列やマークダウンブロックを含めないこと）
+{
+    "implicit_premises": ["箇条書き1", "箇条書き2"],
+    "binary_oppositions": ["対立構造1", "対立構造2"],
+    "emergent_concepts": "数十文字〜数百文字での論理的な記述"
+}
+"""
+
+    prompt = f"検索キーワード: {req.query}\n\n【局所的コンテキスト】\n{req.context_text}"
+
+    data = json.dumps({
+        "model": model_name,
+        "format": "json",
+        "system": system_prompt,
+        "prompt": prompt,
+        "stream": False,
+        "options": {
+            "temperature": 0.2
+        }
+    }).encode('utf-8')
+
+    urllib_req = urllib.request.Request(
+        "http://localhost:11434/api/generate",
+        data=data,
+        headers={'Content-Type': 'application/json'}
+    )
+
+    try:
+        with urllib.request.urlopen(urllib_req) as response:
+            res_data = json.loads(response.read().decode())
+            response_text = res_data.get("response", "{}")
+
+            # クリーンアップ: もしマークダウンブロックがあれば除去
+            cleaned_text = response_text.strip()
+            if cleaned_text.startswith("```json"):
+                cleaned_text = cleaned_text[7:]
+            if cleaned_text.endswith("```"):
+                cleaned_text = cleaned_text[:-3]
+
+            parsed_json = json.loads(cleaned_text.strip())
+            return {"analysis": parsed_json}
+    except Exception as e:
+        return {"error": str(e)}
