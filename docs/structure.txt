@@ -1,0 +1,17 @@
+chatlog-search-nlp/
+├── docs/                     # 詳細な仕様書や設計ドキュメント
+│   ├── requirements.md       # 要件定義書
+│   └── architecture.md       # アーキテクチャ構成・システム設計書
+├── src/                      # アプリケーションのコード
+│   ├── app.py                # FastAPIのメインアプリケーション
+│   ├── build_db.py           # JSONログをSQLiteにインデックス化するスクリプト
+│   ├── static/               # CSSやJavaScriptの静的ファイル
+│   │   ├── css/
+│   │   │   └── style.css
+│   │   └── js/
+│   │       └── main.js
+│   └── templates/            # HTMLテンプレート
+│       └── index.html
+├── .gitignore
+├── requirements.txt
+└── README.md

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChatLog NLP Explorer</title>
+    <!-- Google Fonts for Modern Typography -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;700&family=Noto+Sans+JP:wght@300;400;500;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+    <div class="glass-background"></div>
+    <div class="app-container">
+        <!-- Header Section -->
+        <header class="glass-panel header">
+            <div class="logo">
+                <h1>ChatLog Explorer</h1>
+                <p>Cognitive Insight & NLP Search Engine</p>
+            </div>
+            <div class="search-container" style="display: flex; flex-direction: column;">
+                <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="Search insights, keywords, logic...">
+                    <button id="searchBtn">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                    </button>
+                </div>
+                <div class="search-options"
+                    style="margin-top: 0.5rem; display: flex; gap: 1rem; font-size: 0.85rem; justify-content: flex-end; color: var(--text-muted);">
+                    <label style="cursor: pointer;"><input type="radio" name="searchMode" value="lexical" checked>
+                        Keyword (FTS5)</label>
+                    <label style="cursor: pointer;"><input type="radio" name="searchMode" value="semantic"
+                            style="accent-color: #a371f7;"> Semantic Vector (Ollama)</label>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-layout">
+            <!-- Left Column: Search Results Timeline -->
+            <section class="results-section glass-panel">
+                <div class="section-header">
+                    <h2>Conversations Timeline</h2>
+                    <span id="resultCount" class="badge">0 found</span>
+                </div>
+                <div id="resultsList" class="timeline">
+                    <!-- Results will be injected here -->
+                    <div class="empty-state">
+                        <p>Search for keywords to explore your past thoughts.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Column: NLP Dashboard / Detail -->
+            <aside class="dashboard-section glass-panel">
+                <div class="section-header">
+                    <h2>Semantic Context</h2>
+                </div>
+
+                <!-- Advanced Context & Co-occurrence Area -->
+                <div id="contextSection" class="insight-details">
+                    <h3>Semantic Intelligence <span style="font-size:0.7rem; color:#8a2be2; font-weight: normal;">(LLM
+                            Analysis)</span></h3>
+                    <div id="coOccurringWords" class="word-list" style="margin-bottom: 1rem;">
+                        <div class="empty-state" style="font-size:0.8rem;">Search to see LLM semantic analysis.</div>
+                    </div>
+                </div>
+
+                <!-- Context Snippets Area (KWIC) -->
+                <div id="snippetsSection" class="insight-details">
+                    <h3>Usage Snippets</h3>
+                    <div id="snippetsList" style="max-height: 400px; overflow-y: auto; padding-right: 5px;">
+                        <!-- Context snippets injected here -->
+                    </div>
+                </div>
+
+                <!-- Chart Area -->
+                <div class="chart-container" style="margin-top: 2rem;">
+                    <h3>Global Topics</h3>
+                    <canvas id="keywordChart"></canvas>
+                </div>
+                <!-- Dynamic Content Area -->
+                <div id="insightDetails" class="insight-details">
+                    <h3>Top Frequent Entities</h3>
+                    <ul id="topWordsList" class="word-list">
+                        <!-- Top words injected here -->
+                    </ul>
+                </div>
+                <!-- Highlights Area -->
+                <div id="highlightsSection" class="highlight-section">
+                    <h3>Recent NLP Highlights</h3>
+                    <div id="highlightsList">
+                        <!-- Glasp-like highlights injected here -->
+                    </div>
+                </div>
+            </aside>
+        </main>
+    </div>
+
+    <!-- Floating Highlight Popup Button -->
+    <div id="highlightPopup" style="display: none;">🌟 ハイライトとして保存</div>
+
+    <script src="/static/js/main.js"></script>
+</body>
+
+</html>

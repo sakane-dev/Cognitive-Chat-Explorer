@@ -1,0 +1,32 @@
+# Databases and huge binaries
+*.db
+*.npz
+*.sqlite
+*.sqlite3
+
+# Environment variables (Sensitive Data)
+.env
+.env.*
+
+# Python caches and outputs
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# VS Code and IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
