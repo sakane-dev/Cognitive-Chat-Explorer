@@ -110,19 +110,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     `;
                 }).join('');
 
-                // Add click event to expand/collapse content on cards
-                document.querySelectorAll('.message-card').forEach(card => {
-                    card.addEventListener('click', (e) => {
-                        // Ignore if selecting text to avoid toggling when highlighting
-                        if (window.getSelection().toString().trim().length > 0) return;
-
-                        const content = card.querySelector('.message-content');
-                        if (content) {
-                            content.classList.toggle('collapsed');
-                            content.classList.toggle('expanded');
-                        }
-                    });
-                });
+                // Remove inline click event that expands/collapses card and conflicts with modal/selection
+                // document.querySelectorAll('.message-card').forEach(card => {
+                //     card.addEventListener('click', (e) => {
+                //         if (window.getSelection().toString().trim().length > 0) return;
+                //         const content = card.querySelector('.message-content');
+                //         if (content) {
+                //             content.classList.toggle('collapsed');
+                //             content.classList.toggle('expanded');
+                //         }
+                //     });
+                // });
             } else {
                 resultsList.innerHTML = `<div class="empty-state"><p>No results found for "${query}"</p></div>`;
             }
@@ -454,6 +452,9 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('click', async (e) => {
         const card = e.target.closest('.message-card');
         if(!card) return;
+        // Ignore if selecting text (for Glasp highlight)
+        if(window.getSelection().toString().trim().length > 0) return;
+
         // Ignore if clicking highlight popup or analyze button
         if(e.target.closest('#highlightPopup') || e.target.closest('.context-analyze-btn')) return;
 
