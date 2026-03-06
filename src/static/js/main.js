@@ -330,9 +330,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const range = selection.getRangeAt(0);
             const container = range.commonAncestorContainer;
             const element = container.nodeType === 3 ? container.parentElement : container;
-            const messageCard = element.closest('.message-card');
+            const messageContainer = element.closest('.message-card') || element.closest('.message-skeleton');
 
-            if (messageCard) {
+            if (messageContainer) {
                 // Determine position
                 const rect = range.getBoundingClientRect();
                 highlightPopup.style.left = `${rect.left + window.scrollX + (rect.width/2) - 40}px`;
@@ -342,8 +342,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 selectedTextInfo = {
                     text: text,
                     element: element,
-                    msgId: messageCard.dataset.msgid,
-                    convId: messageCard.dataset.convid,
+                    msgId: messageContainer.dataset.msgid,
+                    convId: messageContainer.dataset.convid,
                     range: range
                 };
                 return;
@@ -499,6 +499,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const skel = document.createElement('div');
                 skel.className = 'message-skeleton';
                 skel.dataset.index = idx;
+                skel.dataset.msgid = msg.id;
+                skel.dataset.convid = convId;
 
                 // スケルトンにプレースホルダーとしての最低高さと、圧縮防止（flex-shrink: 0）を付与
                 skel.style.minHeight = '120px';
