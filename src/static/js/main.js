@@ -489,7 +489,7 @@ document.addEventListener('DOMContentLoaded', () => {
             currentThreadMessages = messages;
 
             modalThreadTitle.textContent = meta.title || "Untitled Chat";
-            modalThreadMeta.textContent = `${meta.total_messages} messages | ${new Date(meta.start_time).toLocaleString()} - ${new Date(meta.end_time).toLocaleString()}`;
+            modalThreadMeta.textContent = `${meta.total_messages} messages | ${new Date(meta.start_time * 1000).toLocaleString()} - ${new Date(meta.end_time * 1000).toLocaleString()}`;
 
             threadContent.innerHTML = '';
 
