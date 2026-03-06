@@ -602,13 +602,21 @@ def analyze_local_context(req: LocalContextRequest):
 与えられたテキスト群が以下のどちらのカテゴリに属するかを判定してください。
 1. conceptual (概念探求型): 抽象的な議論、哲学的な思索、意味の探求、アイデアの壁打ちなど。
 2. task_execution (タスク実行型): ツールへのプロンプト指示、コード生成依頼、翻訳タスク、システムの使い方の質問など。
-
-以下のJSON形式でのみ出力してください。
-{ "category": "conceptual" または "task_execution" }
 """
+    classifier_schema = {
+        "type": "object",
+        "properties": {
+            "category": {
+                "type": "string",
+                "enum": ["conceptual", "task_execution"]
+            }
+        },
+        "required": ["category"]
+    }
+
     classifier_data = json.dumps({
         "model": model_name,
-        "format": "json",
+        "format": classifier_schema,
         "system": classifier_prompt,
         "prompt": f"【テキスト群】\n{req.context_text}",
         "stream": False,
@@ -637,8 +645,16 @@ def analyze_local_context(req: LocalContextRequest):
     except Exception as e:
         print(f"Classification skipped or failed: {e}")
 
-    # --- 第二段階: 動的スキーマ (Dynamic Schema) ---
     if category == "conceptual":
+        format_schema = {
+            "type": "object",
+            "properties": {
+                "implicit_premises": {"type": "array", "items": {"type": "string"}},
+                "binary_oppositions": {"type": "array", "items": {"type": "string"}},
+                "emergent_concepts": {"type": "string"}
+            },
+            "required": ["implicit_premises", "binary_oppositions", "emergent_concepts"]
+        }
         system_prompt = """あなたは、ユーザーの過去の思考ログやチャットのやり取り（局所的コンテキスト）から、底流にある思想、新しい概念、及び思考のパラダイムシフトを深く抽出し、言語化する「高度な認識論的アナリスト（Epistemological Analyst）」です。
 
 【極めて重要な指示：ノイズの無視】
@@ -650,14 +666,17 @@ def analyze_local_context(req: LocalContextRequest):
 1. 暗黙の前提 (implicit_premises): 議論の中で前提とされているパラダイムや条件は何か。
 2. 概念の二項対立 (binary_oppositions): どのような対立構造が構築/解体されようとしているか。
 3. 新しい定義と展望 (emergent_concepts): 対象に対するどのような新しい定義や差異化が試みられているか。概念の深層的な変化を記述。
-
-【出力フォーマット】
-{
-    "implicit_premises": ["箇条書き1", "箇条書き2"],
-    "binary_oppositions": ["対立構造1", "対立構造2"],
-    "emergent_concepts": "数十文字〜数百文字での論理的な記述"
-}"""
+"""
     else:
+        format_schema = {
+            "type": "object",
+            "properties": {
+                "execution_purpose": {"type": "array", "items": {"type": "string"}},
+                "structural_approach": {"type": "array", "items": {"type": "string"}},
+                "improvement_opportunities": {"type": "string"}
+            },
+            "required": ["execution_purpose", "structural_approach", "improvement_opportunities"]
+        }
         system_prompt = """あなたは、ユーザーが過去に実行しようとしたプロセスやプロンプト指示の意図を構造的に分析し、最適化の視座を提供する「プロセス・アーキテクト（Process Architect）」です。
 
 【極めて重要な指示：ノイズの無視】
@@ -669,19 +688,13 @@ def analyze_local_context(req: LocalContextRequest):
 1. 実行目的と制約 (execution_purpose): 過去のユーザーがどのような前提条件で、何を達成しようとしていたか。
 2. 構造的アプローチ (structural_approach): プロンプト内で採用されているツールの使用意図や思考のフレームワークは何か。
 3. 改善の余地 (improvement_opportunities): 現在の視点から見て、そのプロンプトやタスクプロセスをより最適化するための技術的な視座や代替手法。
-
-【出力フォーマット】
-{
-    "execution_purpose": ["箇条書き1", "箇条書き2"],
-    "structural_approach": ["箇条書き1", "箇条書き2"],
-    "improvement_opportunities": "数十文字〜数百文字での論理的な提案"
-}"""
+"""
 
     prompt = f"検索キーワード: {req.query}\n\n【局所的コンテキスト】\n{req.context_text}"
 
     data = json.dumps({
         "model": model_name,
-        "format": "json",
+        "format": format_schema,
         "system": system_prompt,
         "prompt": prompt,
         "stream": False,
