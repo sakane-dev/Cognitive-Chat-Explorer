@@ -6,6 +6,9 @@ echo ===================================================
 echo Cognitive Chat-Explorer: Boot Sequence Initiated
 echo ===================================================
 
+REM カレントディレクトリを確実にモジュール検索パスに追加（src.appのインポートエラー対策）
+set PYTHONPATH=%~dp0
+
 REM 認識論的分析およびセマンティック検索のための環境変数を決定論的に注入
 set OLLAMA_EMBED_MODEL=snowflake-arctic-embed2:latest
 set OLLAMA_MODEL=qwen3:latest
@@ -17,7 +20,7 @@ echo [INFO] Starting FastAPI Server...
 REM サーバー起動の直前に、既定のブラウザでローカルホストを非同期に開く
 start "" http://127.0.0.1:8000
 
-REM Uvicornによるアプリケーションの起動
-uvicorn src.app:app --reload
+REM Uvicornによるアプリケーションの起動 (python -m 経由で実行することで環境の乖離を防ぐ)
+python -m uvicorn src.app:app --reload
 
 pause
