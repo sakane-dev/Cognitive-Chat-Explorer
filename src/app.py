@@ -45,7 +45,7 @@ def get_embedding(text: str) -> np.ndarray:
     data = json.dumps({"model": model_name, "prompt": text}).encode('utf-8')
     req = urllib.request.Request("http://localhost:11434/api/embeddings", data=data, headers={'Content-Type': 'application/json'})
     try:
-        with urllib.request.urlopen(req, timeout=15) as response:
+        with urllib.request.urlopen(req, timeout=60) as response:
             result = json.loads(response.read().decode('utf-8'))
             vec = np.array(result.get("embedding", []), dtype=np.float32)
             if vec.shape[0] > 0:

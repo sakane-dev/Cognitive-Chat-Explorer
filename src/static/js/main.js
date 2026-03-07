@@ -333,10 +333,22 @@ document.addEventListener('DOMContentLoaded', () => {
             const messageContainer = element.closest('.message-card') || element.closest('.message-skeleton');
 
             if (messageContainer) {
-                // Determine position
                 const rect = range.getBoundingClientRect();
-                highlightPopup.style.left = `${rect.left + window.scrollX + (rect.width/2) - 40}px`;
-                highlightPopup.style.top = `${rect.top + window.scrollY - 30}px`;
+
+                // Viewport基準の絶対座標計算
+                let popX = rect.left + (rect.width / 2) - 40;
+                let popY = rect.top - 40;
+
+                // 画面上部を突き抜ける場合の安全装置（テキストの下へ配置）
+                if (popY < 10) {
+                    popY = rect.bottom + 10;
+                }
+
+                // 強制的なFixed配置と最前面Z-index
+                highlightPopup.style.position = 'fixed';
+                highlightPopup.style.left = `${popX}px`;
+                highlightPopup.style.top = `${popY}px`;
+                highlightPopup.style.zIndex = '2147483647';
                 highlightPopup.style.display = 'block';
 
                 selectedTextInfo = {
