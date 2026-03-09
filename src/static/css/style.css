@@ -496,3 +496,13 @@ body {
     background: #a371f7;
     color: #fff;
 }
+
+/* History Item Styles */
+.history-item:hover {
+    background: rgba(255, 255, 255, 0.08) !important;
+}
+
+.history-item:active {
+    background: rgba(255, 255, 255, 0.12) !important;
+    transform: scale(0.99);
+}

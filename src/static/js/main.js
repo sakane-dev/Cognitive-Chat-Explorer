@@ -7,12 +7,24 @@ document.addEventListener('DOMContentLoaded', () => {
     const highlightsList = document.getElementById('highlightsList');
     const highlightPopup = document.getElementById('highlightPopup');
 
+    const historyToggle = document.getElementById('historyToggle');
+    const historyPanel = document.getElementById('historyPanel');
+    const historyList = document.getElementById('historyList');
+    const historyBadge = document.getElementById('historyBadge');
+    const historyLoadMore = document.getElementById('historyLoadMore');
+
     let chartInstance = null;
     let selectedTextInfo = null; // { text, element }
+    let historyOffset = 0;
+    const historyLimit = 20;
+
+    // message_id -> [text1, text2, ...] のマップ（DB上の保存済みハイライトをキャッシュする）
+    let highlightMap = {};
 
     // 初期ロード時に全体の傾向を取得
     fetchAnalysis();
     fetchRecentHighlights();
+    fetchHistory(); // 履歴の初期取得
 
     // 検索イベント
     const performSearch = () => {
@@ -37,6 +49,34 @@ document.addEventListener('DOMContentLoaded', () => {
     searchBtn.addEventListener('click', performSearch);
     searchInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') performSearch();
+    });
+
+    // ソートボタンの切り替え制御
+    const sortHistoryBtn = document.getElementById('sortHistoryBtn');
+    if (sortHistoryBtn) {
+        sortHistoryBtn.addEventListener('click', (e) => {
+            const currentSort = sortHistoryBtn.dataset.sort;
+            const newSort = currentSort === 'desc' ? 'asc' : 'desc';
+
+            sortHistoryBtn.dataset.sort = newSort;
+            sortHistoryBtn.innerHTML = newSort === 'desc' ? '🔽 最新順' : '🔼 古い順';
+
+            fetchHistory(false); // ソート変更時は最初から読み直し
+        });
+    }
+
+    // 更新ボタンの制御
+    const refreshHistoryBtn = document.getElementById('refreshHistoryBtn');
+    if (refreshHistoryBtn) {
+        refreshHistoryBtn.addEventListener('click', (e) => {
+            fetchHistory(false);
+        });
+    }
+
+    // History Load More
+    historyLoadMore.addEventListener('click', (e) => {
+        e.stopPropagation();
+        fetchHistory(true);
     });
 
     async function fetchSearch(query) {
@@ -65,35 +105,40 @@ document.addEventListener('DOMContentLoaded', () => {
                     let escapedContent = escapeHTML(msg.content);
 
                     // ---------------------------------------------------
-                    // 条件分岐による動的ハイライト処理
+                    // 1) 条件分岐による動的ハイライト処理（キーワード/セマンティック）
                     // ---------------------------------------------------
                     let contentStyle = '';
                     let badgeHtml = '';
 
                     if (searchMode === 'lexical') {
-                        // === Keyword (FTS5) モード ===
-                        // 語彙的に一致する語を正規表現でオレンジ強調
                         termsToHighlight.forEach(term => {
                             if (term.length > 0) {
                                 const regex = new RegExp(`(${escapeHTML(term)})`, 'gi');
                                 escapedContent = escapedContent.replace(regex, '<span class="highlight-match">$1</span>');
                             }
                         });
-
                     } else {
-                        // === Semantic Vector モード ===
                         if (msg.contains_keyword) {
-                            // 完全一致バッジ + オレンジハイライト
                             badgeHtml = '<span class="result-badge badge-exact">✓ キーワード含む</span>';
                             const regex = new RegExp(`(${escapeHTML(query)})`, 'gi');
                             escapedContent = escapedContent.replace(regex, '<span class="highlight-match">$1</span>');
                         } else {
-                            // 意味的近傍バッジ + 文章全体のアンビエント強調
-                            // 特定単語への依存なく「コンテキスト全体を提示」するUI
                             badgeHtml = '<span class="result-badge badge-semantic">〜 意味的に近い</span>';
                             contentStyle = 'background: rgba(138, 43, 226, 0.06); border-radius: 4px; padding: 6px; border-left: 2px solid rgba(138,43,226,0.4);';
                         }
                     }
+
+                    // ---------------------------------------------------
+                    // 2) DB保存済みハイライトをカードにも再適用（永続表示）
+                    // ---------------------------------------------------
+                    const savedTexts = highlightMap[msg.id] || [];
+                    savedTexts.forEach(savedText => {
+                        if (savedText.length < 3) return;
+                        const escapedSaved = escapeHTML(savedText);
+                        const safePattern = escapedSaved.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                        const regex = new RegExp(`(${safePattern})`, 'g');
+                        escapedContent = escapedContent.replace(regex, '<span class="highlighted-text">$1</span>');
+                    });
 
                     return `
                         <div class="message-card" data-msgid="${msg.id}" data-convid="${msg.conversation_id}">
@@ -109,23 +154,72 @@ document.addEventListener('DOMContentLoaded', () => {
                         </div>
                     `;
                 }).join('');
-
-                // Remove inline click event that expands/collapses card and conflicts with modal/selection
-                // document.querySelectorAll('.message-card').forEach(card => {
-                //     card.addEventListener('click', (e) => {
-                //         if (window.getSelection().toString().trim().length > 0) return;
-                //         const content = card.querySelector('.message-content');
-                //         if (content) {
-                //             content.classList.toggle('collapsed');
-                //             content.classList.toggle('expanded');
-                //         }
-                //     });
-                // });
             } else {
                 resultsList.innerHTML = `<div class="empty-state"><p>No results found for "${query}"</p></div>`;
             }
         } catch (e) {
             console.error(e);
+        }
+    }
+
+    async function fetchHistory(append = false) {
+        const sortBtn = document.getElementById('sortHistoryBtn');
+        const sortOrder = sortBtn ? sortBtn.dataset.sort : 'desc';
+
+        if (!append) {
+            historyOffset = 0;
+            historyList.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-muted); font-size: 0.85rem;">Loading...</div>';
+        }
+
+        try {
+            const res = await fetch(`/api/conversations?limit=${historyLimit}&offset=${historyOffset}&sort=${sortOrder}`);
+            const data = await res.json();
+
+            if (data.error) {
+                console.error("History Error:", data.error);
+                return;
+            }
+
+            const results = data.results || [];
+
+            if (results.length > 0) {
+                const html = results.map(conv => {
+                    const d = new Date(conv.create_time * 1000);
+                    const dateStr = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+
+                    return `
+                        <div class="history-item" data-convid="${conv.id}" style="padding: 10px; border-radius: 6px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.03); display: flex; flex-direction: column; transition: background 0.2s;">
+                            <div style="font-size: 0.85rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-primary); margin-bottom: 4px;">
+                                ${escapeHTML(conv.title || "Untitled Chat")}
+                            </div>
+                            <div style="font-size: 0.7rem; color: var(--text-muted); display: flex; justify-content: space-between;">
+                                <span>${dateStr}</span>
+                                <span>💬 ${conv.message_count}</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                if (append) {
+                    historyList.insertAdjacentHTML('beforeend', html);
+                } else {
+                    historyList.innerHTML = html;
+                }
+
+                historyOffset += results.length;
+                historyBadge.textContent = historyOffset;
+
+                historyLoadMore.style.display = results.length === historyLimit ? 'block' : 'none';
+            } else if (!append) {
+                historyList.innerHTML = '<div class="empty-state" style="font-size: 0.75rem;">No history found.</div>';
+                historyBadge.textContent = '0';
+                historyLoadMore.style.display = 'none';
+            }
+        } catch (e) {
+            console.error("Fetch History Error:", e);
+            if (!append) {
+                historyList.innerHTML = '<div style="padding:10px; color:#ff7b72; font-size:0.85rem;">履歴の取得に失敗しました</div>';
+            }
         }
     }
 
@@ -330,7 +424,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const range = selection.getRangeAt(0);
             const container = range.commonAncestorContainer;
             const element = container.nodeType === 3 ? container.parentElement : container;
-            const messageContainer = element.closest('.message-card') || element.closest('.message-skeleton');
+            // 分析エリア（#localContextAnalysisArea）もハイライト対象として許可
+            const messageContainer = element.closest('.message-card') || element.closest('.message-skeleton') || element.closest('#localContextAnalysisArea');
 
             if (messageContainer) {
                 const rect = range.getBoundingClientRect();
@@ -368,32 +463,65 @@ document.addEventListener('DOMContentLoaded', () => {
     highlightPopup.addEventListener('click', async () => {
         if (!selectedTextInfo) return;
 
-        // Optional: Highlight visually in DOM (simple wrapping)
+        const savedInfo = { ...selectedTextInfo }; // クロージャ汚染防止のためコピー
+
+        // DOM上への即時視覚フィードバック（同一ノード内のみ安全に実行）
         try {
             const span = document.createElement('span');
             span.className = 'highlighted-text';
-            selectedTextInfo.range.surroundContents(span);
-        } catch(e) { /* Ignore wrapping errors across nodes */ }
+            savedInfo.range.surroundContents(span);
+        } catch(e) { /* 複数ノードにまたがる選択時は無視 */ }
 
-        highlightPopup.style.display = 'none';
+        // ポップアップを「保存中...」表示に切替
+        highlightPopup.textContent = '💾 保存中...';
+        highlightPopup.style.pointerEvents = 'none';
+        selectedTextInfo = null;
 
-        // Notify Backend
         try {
             const res = await fetch('/api/highlights', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    message_id: selectedTextInfo.msgId,
-                    conversation_id: selectedTextInfo.convId,
-                    text_content: selectedTextInfo.text
+                    message_id: savedInfo.msgId,
+                    conversation_id: savedInfo.convId,
+                    text_content: savedInfo.text
                 })
             });
             const data = await res.json();
-            if(data.status === 'ok') {
+
+            if (data.status === 'ok') {
+                // highlightMapにも即時反映（再検索前でもモーダルで参照できるよう）
+                if (!highlightMap[savedInfo.msgId]) highlightMap[savedInfo.msgId] = [];
+                highlightMap[savedInfo.msgId].push(savedInfo.text);
+
+                // 完了フィードバック
+                const label = data.nlp_skipped
+                    ? '⚠️ 保存済(NLPスキップ)'
+                    : '✅ 保存完了！';
+                highlightPopup.textContent = label;
+                setTimeout(() => {
+                    highlightPopup.style.display = 'none';
+                    highlightPopup.textContent = '🌟 ハイライトとして保存';
+                    highlightPopup.style.pointerEvents = 'auto';
+                }, 1800);
+
                 fetchRecentHighlights();
+            } else {
+                highlightPopup.textContent = '❌ 保存失敗';
+                setTimeout(() => {
+                    highlightPopup.style.display = 'none';
+                    highlightPopup.textContent = '🌟 ハイライトとして保存';
+                    highlightPopup.style.pointerEvents = 'auto';
+                }, 2000);
             }
         } catch(e) {
             console.error('Highlight save error', e);
+            highlightPopup.textContent = '❌ ネットワークエラー';
+            setTimeout(() => {
+                highlightPopup.style.display = 'none';
+                highlightPopup.textContent = '🌟 ハイライトとして保存';
+                highlightPopup.style.pointerEvents = 'auto';
+            }, 2000);
         }
         window.getSelection().removeAllRanges();
     });
@@ -403,6 +531,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch('/api/highlights');
             const data = await res.json();
             if (data.results) {
+                // --- highlightMapを再構築（DB上の全ハイライトを message_id でインデックス化）---
+                highlightMap = {};
+                data.results.forEach(h => {
+                    if (!highlightMap[h.message_id]) highlightMap[h.message_id] = [];
+                    if (h.text_content) highlightMap[h.message_id].push(h.text_content);
+                });
+
                 if (data.results.length === 0) {
                     highlightsList.innerHTML = '<div class="empty-state"><p>No highlights yet.</p></div>';
                 } else {
@@ -411,11 +546,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (h.nlp_tags) {
                             try {
                                 const parsed = JSON.parse(h.nlp_tags);
-                                tagHtml = `
-                                    <div class="tags">🏷️ ${escapeHTML(parsed.tags)}</div>
-                                    ${parsed.context ? `<div style="font-size: 0.75rem; color: #848d97; margin-top: 5px; line-height: 1.3;">Context: ${escapeHTML(parsed.context)}</div>` : ''}
-                                    ${parsed.intent ? `<div style="font-size: 0.75rem; color: #a371f7; margin-top: 2px; line-height: 1.3;">Intent: ${escapeHTML(parsed.intent)}</div>` : ''}
-                                `;
+                                const hasNlp = parsed.tags || parsed.context || parsed.intent;
+                                if (hasNlp) {
+                                    tagHtml = `
+                                        ${parsed.tags ? `<div class="tags">🏷️ ${escapeHTML(parsed.tags)}</div>` : ''}
+                                        ${parsed.context ? `<div style="font-size: 0.75rem; color: #848d97; margin-top: 5px; line-height: 1.3;">Context: ${escapeHTML(parsed.context)}</div>` : ''}
+                                        ${parsed.intent ? `<div style="font-size: 0.75rem; color: #a371f7; margin-top: 2px; line-height: 1.3;">Intent: ${escapeHTML(parsed.intent)}</div>` : ''}
+                                    `;
+                                } else {
+                                    tagHtml = `<div style="font-size:0.72rem; color:#848d97; margin-top:4px;">⚠️ NLP未解析（Ollama停止中に保存）</div>`;
+                                }
                             } catch(e) {
                                 tagHtml = `<div class="tags">🏷️ ${escapeHTML(h.nlp_tags)}</div>`;
                             }
@@ -460,9 +600,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Delegation for clicking message card to open thread modal
+    // Delegation for clicking message card or history item to open thread modal
     document.addEventListener('click', async (e) => {
+        const historyItem = e.target.closest('.history-item');
         const card = e.target.closest('.message-card');
+
+        if (historyItem) {
+            const convid = historyItem.dataset.convid;
+            const query = searchInput.value.trim();
+            // 履歴からのジャンプ時は特定のメッセージをハイライトせず、スレッド全体を表示
+            openThreadModal(convid, null, query);
+            return;
+        }
+
         if(!card) return;
         // Ignore if selecting text (for Glasp highlight)
         if(window.getSelection().toString().trim().length > 0) return;
@@ -606,6 +756,20 @@ document.addEventListener('DOMContentLoaded', () => {
             content.textContent = msgData.content;
         }
 
+        // --- DB保存済みハイライトをモーダル内コンテンツにも再適用 ---
+        const savedTexts = highlightMap[msgData.id] || [];
+        if (savedTexts.length > 0) {
+            let html = content.innerHTML;
+            savedTexts.forEach(savedText => {
+                if (savedText.length < 3) return;
+                // マークダウンがレンダリングされたHTML内のテキストに対しても安全にマッチする
+                const safePattern = savedText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const regex = new RegExp(`(${safePattern})`, 'g');
+                html = html.replace(regex, '<span class="highlighted-text">$1</span>');
+            });
+            content.innerHTML = html;
+        }
+
         skel.appendChild(header);
         skel.appendChild(content);
         if(btn) {
@@ -629,6 +793,13 @@ document.addEventListener('DOMContentLoaded', () => {
         btns.forEach(b => { b.textContent = "Analyzing..."; b.disabled = true; });
 
         localContextArea.style.display = 'block';
+
+        // 【設計漏れ修正】分析の起点となったメッセージのIDをエリアに埋め込む
+        // これによりハイライト保存時に「どのメッセージを起点にした分析か」を追跡できる
+        const anchorMsg = currentThreadMessages[anchorIndex];
+        localContextArea.dataset.convid = anchorMsg.conversation_id;
+        localContextArea.dataset.msgid = anchorMsg.id;
+
         localContextContent.innerHTML = '<span style="color:var(--text-muted)">Analyzing local context via Qwen3...</span>';
 
         localContextContent.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -697,5 +868,121 @@ document.addEventListener('DOMContentLoaded', () => {
         } finally {
             btns.forEach(b => { b.innerHTML = '✨ Re-analyze Local Context <span style="font-size:0.6rem;opacity:0.8;">(LLM)</span>'; b.disabled = false; });
         }
+    }
+
+    // ==========================================
+    // 3.2. Markdownエクスポート機能（統合・最適化版）
+    // ==========================================
+
+    // メモリ上の配列からMarkdown文字列を生成
+    function generateMarkdownFromThread() {
+        if (!currentThreadMessages || currentThreadMessages.length === 0) return "";
+
+        const titleEl = document.getElementById('modalThreadTitle');
+        const metaEl = document.getElementById('modalThreadMeta');
+        const title = (titleEl ? titleEl.textContent : "Untitled Thread") || "Untitled Thread";
+        const meta = (metaEl ? metaEl.textContent : "") || "";
+        const exportDate = new Date().toLocaleString();
+
+        let md = `# ${title}\n\n`;
+        md += `Exported from Cognitive Knowledge Engine | Exported: ${exportDate}\n`;
+        if (meta) md += `> ${meta}\n`;
+        md += `\n---\n\n`;
+
+        currentThreadMessages.forEach(msg => {
+            // ロールを大文字に (USER / ASSISTANT)
+            const role = msg.author_role.toUpperCase();
+            const dateStr = new Date(msg.create_time * 1000).toLocaleString();
+
+            md += `### ${role} (${dateStr})\n\n`;
+            md += `${msg.content}\n\n`;
+            md += `---\n\n`;
+        });
+
+        md += "\n*Generated by Cognitive Knowledge Engine*\n";
+        return md;
+    }
+
+    // 📋 クリップボードへコピー
+    const exportCopyBtn = document.getElementById('exportCopyBtn');
+    if (exportCopyBtn) {
+        exportCopyBtn.addEventListener('click', async (e) => {
+            // ★修正: awaitの前にボタンのDOM参照を安全に確保しておく
+            const btn = e.currentTarget;
+            const originalHtml = btn.innerHTML;
+
+            const md = generateMarkdownFromThread();
+            if (!md) {
+                alert("エクスポートするデータがありません。");
+                return;
+            }
+
+            try {
+                // クリップボード書き込み
+                await navigator.clipboard.writeText(md);
+
+                // UIの成功フィードバック
+                btn.innerHTML = '✅ Copied!';
+                btn.style.color = '#7ee787';
+                btn.style.borderColor = '#7ee787';
+
+                // 2秒後に元の見た目に戻す
+                setTimeout(() => {
+                    btn.innerHTML = originalHtml;
+                    btn.style.color = '#3fb950';
+                    btn.style.borderColor = 'rgba(63, 185, 80, 0.3)';
+                }, 2000);
+            } catch (err) {
+                console.error('Failed to copy text: ', err);
+                alert('クリップボードへのアクセスがブラウザに拒否されたか、エラーが発生しました。');
+            }
+        });
+    }
+
+    // 📥 .md ファイルとしてダウンロード
+    const exportDownloadBtn = document.getElementById('exportDownloadBtn');
+    if (exportDownloadBtn) {
+        exportDownloadBtn.addEventListener('click', () => {
+            try {
+                const md = generateMarkdownFromThread();
+                if (!md) {
+                    alert("エクスポートするデータがありません。");
+                    return;
+                }
+
+                // ファイル名のサニタイズ
+                const titleEl = document.getElementById('modalThreadTitle');
+                const rawTitle = (titleEl ? titleEl.textContent : "Thread") || "Thread";
+                const safeTitle = rawTitle.replace(/[\\/:*?"<>| ]/g, '_');
+
+                // ★修正: サイレントクラッシュを防ぐ安全なID抽出
+                let convId = "export";
+                if (typeof currentThreadMessages !== 'undefined' && currentThreadMessages && currentThreadMessages.length > 0) {
+                    const rawId = currentThreadMessages[0].conversation_id;
+                    if (rawId) {
+                        convId = String(rawId).substring(0, 8);
+                    }
+                }
+                const filename = `${safeTitle}_${convId}.md`;
+
+                // Blobを利用してブラウザ内でファイルを動的生成
+                const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+
+                // 仮想リンクによるダウンロード発火
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+
+                // メモリのクリーンアップ
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } catch (err) {
+                console.error('Download error: ', err);
+                alert('ファイルの生成中にエラーが発生しました。\n' + err.message);
+            }
+        });
     }
 });
