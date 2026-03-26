@@ -345,6 +345,7 @@ body {
     align-items: center;
     gap: 0.4rem;
     transition: all 0.2s;
+    cursor: pointer;
 }
 
 .word-tag:hover {
@@ -358,6 +359,79 @@ body {
     font-size: 0.7rem;
     padding: 0.1rem 0.4rem;
     border-radius: 10px;
+}
+
+.usage-snippet:hover {
+    background: rgba(255, 255, 255, 0.1) !important;
+    transform: translateX(4px);
+}
+
+/* Semantic Intelligence: セクションコピーボタン */
+.sem-section {
+    position: relative;
+    padding: 10px;
+    border-radius: 6px;
+    margin-bottom: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border-left: 3px solid transparent;
+    transition: background 0.2s;
+}
+
+.sem-section:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.sem-copy-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: var(--text-secondary);
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-size: 0.7rem;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s, background 0.2s;
+}
+
+.sem-section:hover .sem-copy-btn {
+    opacity: 1;
+}
+
+.sem-copy-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+}
+
+/* 根拠スニペット（Evidence）表示 */
+.sem-evidence-item {
+    background: rgba(255, 255, 255, 0.04);
+    border-left: 2px solid rgba(163, 113, 247, 0.4);
+    border-radius: 4px;
+    padding: 7px 10px;
+    margin-bottom: 6px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.15s;
+}
+
+.sem-evidence-item:hover {
+    background: rgba(163, 113, 247, 0.1);
+    transform: translateX(3px);
+}
+
+/* LLM分析テキスト内のドリルダウンキーワード */
+.llm-keyword {
+    cursor: pointer;
+    border-bottom: 1px dotted rgba(88, 166, 255, 0.5);
+    transition: color 0.15s, border-bottom-color 0.15s;
+}
+
+.llm-keyword:hover {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
 }
 
 /* Highlight / Glasp-like Feature */
@@ -411,6 +485,37 @@ body {
     color: rgba(210, 153, 34, 0.9);
     font-weight: 500;
 }
+
+.highlight-action-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--panel-border);
+    color: var(--text-secondary);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.highlight-action-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+    border-color: var(--accent);
+}
+
+.highlight-action-btn.copy-highlight:hover {
+    border-color: #3fb950;
+    color: #3fb950;
+}
+
+.highlight-action-btn.jump-to-source:hover {
+    border-color: #a371f7;
+    color: #a371f7;
+}
+
 
 /* Modal Overlay & Container */
 .modal-overlay {
