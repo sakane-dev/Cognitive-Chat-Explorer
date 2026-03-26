@@ -39,6 +39,6 @@ start "" cmd /c "timeout /t 15 /nobreak > nul && start http://127.0.0.1:8000"
 
 REM Uvicornによるアプリケーションの起動
 REM lifespan機構によりモデルのウォームアップが完了してからリクエスト受付が開始される
-python -m uvicorn src.app:app --reload
+.\venv\Scripts\python.exe -m uvicorn src.app:app --reload
 
 pause

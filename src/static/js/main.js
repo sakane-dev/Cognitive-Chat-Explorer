@@ -26,6 +26,71 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchRecentHighlights();
     fetchHistory(); // 履歴の初期取得
 
+    // --- 統計データ/共起語タグからのドリルダウン検索 (Event Delegation) ---
+    document.addEventListener('click', (e) => {
+        const tag = e.target.closest('.word-tag');
+        const snippet = e.target.closest('.usage-snippet');
+
+        if (tag) {
+            // タグ内のテキスト（単語部分のみ）を取得
+            // .word-countの内容を除去したクリーンな単語を取得する
+            let word = "";
+            const nodes = tag.childNodes;
+            for (let i = 0; i < nodes.length; i++) {
+                if (nodes[i].nodeType === Node.TEXT_NODE) {
+                    word += nodes[i].textContent.trim();
+                } else if (!nodes[i].classList.contains('word-count')) {
+                    // count以外の要素があればそのテキストも（念のため）
+                    word += nodes[i].innerText.trim();
+                }
+            }
+            if (word) {
+                searchInput.value = word;
+                performSearch();
+            }
+            return;
+        }
+
+        if (snippet) {
+            const msgId = snippet.dataset.msgid;
+            const convId = snippet.dataset.convid;
+            const query = searchInput.value.trim();
+
+            // 1. まず中央のタイムラインにあるか探す
+            const targetCard = document.querySelector(`.message-card[data-msgid="${msgId}"]`);
+            if (targetCard) {
+                targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                targetCard.style.outline = "2px solid #a371f7";
+                setTimeout(() => { targetCard.style.outline = "none"; }, 2000);
+            } else {
+                // 2. なければスレッドモーダルを開く
+                openThreadModal(convId, msgId, query);
+            }
+            return;
+        }
+
+        // --- Semantic Intelligence の根拠スニペットのクリックでスレッドモーダルへジャンプ ---
+        const evidenceItem = e.target.closest('.sem-evidence-item');
+        if (evidenceItem) {
+            const msgId = evidenceItem.dataset.msgid;
+            const convId = evidenceItem.dataset.convid;
+            const query = searchInput.value.trim();
+            openThreadModal(convId, msgId, query);
+            return;
+        }
+
+        // --- Semantic Intelligence のキーワードクリックでドリルダウン検索 ---
+        const kwEl = e.target.closest('.llm-keyword');
+        if (kwEl) {
+            const kw = kwEl.dataset.kw;
+            if (kw) {
+                searchInput.value = kw;
+                performSearch();
+            }
+            return;
+        }
+    });
+
     // 検索イベント
     const performSearch = () => {
         const query = searchInput.value.trim();
@@ -253,13 +318,21 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const coOccurringWords = document.getElementById('coOccurringWords');
             const snippetsList = document.getElementById('snippetsList');
-            coOccurringWords.innerHTML = 'Loading context...';
-            snippetsList.innerHTML = '';
+
+            // 以前の結果を即座に消さず、読み込み中であることを視覚的に示す（不透明度調整）
+            coOccurringWords.style.opacity = '0.5';
+            // snippetsList は件数が多いためクリアして Loading 表示
+            snippetsList.innerHTML = '<div style="text-align:center; padding:10px; color:#848d97; font-size:0.8rem;">Loading related snippets...</div>';
 
             const res = await fetch(`/api/context?q=${encodeURIComponent(query)}`);
             const data = await res.json();
 
-            if (data.error) return;
+            coOccurringWords.style.opacity = '1';
+
+            if (data.error) {
+                coOccurringWords.innerHTML = '';
+                return;
+            }
 
             if (data.co_occurring_words) {
                 coOccurringWords.innerHTML = data.co_occurring_words.map(t =>
@@ -282,10 +355,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     });
 
+                    const dateStr = new Date(s.date * 1000).toLocaleDateString();
+
                     return `
-                        <div style="background: rgba(255,255,255,0.05); padding: 10px; border-radius: 6px; margin-bottom: 8px; font-size: 0.85rem; border-left: 3px solid #8a2be2;">
-                            <div style="color: #848d97; font-size: 0.75rem; margin-bottom: 4px;">${escapeHTML(s.title || 'Unknown Doc')}</div>
-                            <div style="color: #c9d1d9;">${escapedContent}</div>
+                        <div class="usage-snippet" data-msgid="${s.message_id}" data-convid="${s.conversation_id}" 
+                             style="background: rgba(255,255,255,0.05); padding: 10px; border-radius: 6px; margin-bottom: 8px; font-size: 0.82rem; border-left: 3px solid #8a2be2; cursor: pointer; transition: background 0.2s;">
+                            <div style="display: flex; justify-content: space-between; color: #848d97; font-size: 0.7rem; margin-bottom: 4px;">
+                                <span>${escapeHTML(s.title || 'Untitled')}</span>
+                                <span style="font-family: monospace;">${dateStr}</span>
+                            </div>
+                            <div style="color: #c9d1d9; line-height: 1.4;">${escapedContent}</div>
                         </div>
                     `;
                 }).join('');
@@ -294,54 +373,147 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function fetchSemanticContext(query) {
-        // proto.pyベースの /api/semantic_context を呼び出し、LLMによるメタ分析結果を右ペインに表示する
-        const coOccurringWords = document.getElementById('coOccurringWords');
-        // LLMが分析中であることをコンテキストエリアに表示
-        coOccurringWords.innerHTML = '<span style="color:#848d97; font-size: 0.8rem;">🤖 LLM analyzing semantic context...</span>';
+        const llmAnalysisContent = document.getElementById('llmAnalysisContent');
+
+        // ローディング中はステータスメッセージを先頭に表示し、既存内容を薄くする
+        const statusEl = document.createElement('div');
+        statusEl.id = 'llmStatus';
+        statusEl.innerHTML = '<span style="color:#a371f7; font-size: 0.8rem; font-weight:600;">🤖 LLM analyzing semantic context...</span>';
+        statusEl.style.marginBottom = '10px';
+        const oldStatus = document.getElementById('llmStatus');
+        if (oldStatus) oldStatus.remove();
+        llmAnalysisContent.style.opacity = '0.5';
+        llmAnalysisContent.prepend(statusEl);
 
         try {
             const res = await fetch(`/api/semantic_context?q=${encodeURIComponent(query)}`);
             const data = await res.json();
 
+            llmAnalysisContent.style.opacity = '1';
+            const currentStatus = document.getElementById('llmStatus');
+            if (currentStatus) currentStatus.remove();
+
             if (data.error) {
-                coOccurringWords.innerHTML = `<span style="color:#f85149; font-size:0.8rem;">${escapeHTML(data.error)}</span>`;
+                llmAnalysisContent.innerHTML = `<span style="color:#f85149; font-size:0.8rem;">${escapeHTML(data.error)}</span>`;
                 return;
             }
 
             const analysis = data.analysis || {};
+            const snippets = data.snippets || [];
+
+            // --- ヘルパー: テキストをキーワードスパンでラップする ---
+            // セグメントに分割し、5文字以上の語句を .llm-keyword でラップ
+            function wrapKeywords(text) {
+                if (!text) return '';
+                // 「、」「。」「・」「（」「）」「「」「」」「 」「/」で区切る
+                return escapeHTML(text).replace(/([^、。・（）「」\s\/]{5,})/g, (match) => {
+                    // ひらがなのみはスキップ（意味的でない語を排除）
+                    if (/^[\u3041-\u3096]+$/.test(match)) return match;
+                    return `<span class="llm-keyword" data-kw="${match}">${match}</span>`;
+                });
+            }
+
+            // --- ヘルパー: セクション用コピーボタンHTML ---
+            function copyBtnHtml(label) {
+                return `<button class="sem-copy-btn" data-copy-label="${escapeHTML(label)}">📋</button>`;
+            }
 
             let analysisHtml = '';
 
             if (analysis.error) {
                 analysisHtml = `<div style="color:#f85149; font-size:0.8rem;">${escapeHTML(analysis.error)}</div>`;
             } else {
+                // 全体コピーボタン
+                analysisHtml += `
+                    <div style="display:flex; justify-content:flex-end; margin-bottom:8px;">
+                        <button id="semCopyAll" style="background:rgba(88,166,255,0.1); border:1px solid rgba(88,166,255,0.3); color:var(--accent); border-radius:6px; padding:3px 10px; font-size:0.72rem; cursor:pointer; transition:0.2s;">
+                            📋 全体コピー
+                        </button>
+                    </div>`;
+
                 if (analysis.overall_context) {
                     analysisHtml += `
-                        <div style="margin-bottom: 12px;">
-                            <div style="font-size:0.7rem; font-weight:600; color: #58a6ff; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">📌 Overall Context</div>
-                            <div style="font-size:0.82rem; color:#c9d1d9; line-height:1.5;">${escapeHTML(analysis.overall_context)}</div>
+                        <div class="sem-section" style="border-left-color: rgba(88,166,255,0.4);" data-section-text="${escapeHTML(analysis.overall_context)}">
+                            ${copyBtnHtml('Overall Context')}
+                            <div style="font-size:0.7rem; font-weight:600; color:#58a6ff; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">📌 Overall Context</div>
+                            <div style="font-size:0.82rem; color:#c9d1d9; line-height:1.6;">${wrapKeywords(analysis.overall_context)}</div>
                         </div>`;
                 }
                 if (analysis.dichotomy_and_relations) {
                     analysisHtml += `
-                        <div style="margin-bottom: 12px;">
-                            <div style="font-size:0.7rem; font-weight:600; color:#a371f7; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">⚡ Dichotomy & Relations</div>
-                            <div style="font-size:0.82rem; color:#c9d1d9; line-height:1.5;">${escapeHTML(analysis.dichotomy_and_relations)}</div>
+                        <div class="sem-section" style="border-left-color: rgba(163,113,247,0.4);" data-section-text="${escapeHTML(analysis.dichotomy_and_relations)}">
+                            ${copyBtnHtml('Dichotomy & Relations')}
+                            <div style="font-size:0.7rem; font-weight:600; color:#a371f7; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">⚡ Dichotomy & Relations</div>
+                            <div style="font-size:0.82rem; color:#c9d1d9; line-height:1.6;">${wrapKeywords(analysis.dichotomy_and_relations)}</div>
                         </div>`;
                 }
                 if (analysis.new_definitions) {
                     analysisHtml += `
-                        <div style="margin-bottom: 12px;">
-                            <div style="font-size:0.7rem; font-weight:600; color:#3fb950; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">🔬 New Definitions</div>
-                            <div style="font-size:0.82rem; color:#c9d1d9; line-height:1.5;">${escapeHTML(analysis.new_definitions)}</div>
+                        <div class="sem-section" style="border-left-color: rgba(63,185,80,0.4);" data-section-text="${escapeHTML(analysis.new_definitions)}">
+                            ${copyBtnHtml('New Definitions')}
+                            <div style="font-size:0.7rem; font-weight:600; color:#3fb950; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">🔬 New Definitions</div>
+                            <div style="font-size:0.82rem; color:#c9d1d9; line-height:1.6;">${wrapKeywords(analysis.new_definitions)}</div>
+                        </div>`;
+                }
+
+                // --- 根拠スニペット（Evidence Source）---
+                if (snippets.length > 0) {
+                    analysisHtml += `
+                        <div style="margin-top:14px; border-top:1px solid var(--panel-border); padding-top:10px;">
+                            <div style="font-size:0.7rem; font-weight:600; color:#848d97; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px;">
+                                📚 根拠（Evidence Source）<span style="font-weight:normal; font-size:0.65rem; margin-left:6px;">${snippets.length}件の会話から生成</span>
+                            </div>
+                            ${snippets.map(s => {
+                                const dateStr = new Date(s.date * 1000).toLocaleDateString();
+                                return `
+                                <div class="sem-evidence-item" data-msgid="${s.message_id}" data-convid="${s.conversation_id}">
+                                    <div style="display:flex; justify-content:space-between; color:#848d97; font-size:0.68rem; margin-bottom:3px;">
+                                        <span>${escapeHTML(s.title || 'Untitled')}</span>
+                                        <span style="font-family:monospace;">${dateStr}</span>
+                                    </div>
+                                    <div style="color:#8b949e; line-height:1.4; font-size:0.75rem;">${escapeHTML(s.snippet)}</div>
+                                </div>`;
+                            }).join('')}
                         </div>`;
                 }
             }
 
-            coOccurringWords.innerHTML = analysisHtml || '<span style="color:#848d97; font-size:0.8rem;">No semantic analysis available.</span>';
+            llmAnalysisContent.innerHTML = analysisHtml || '<span style="color:#848d97; font-size:0.8rem;">No semantic analysis available.</span>';
+
+            // --- 全体コピーボタンのイベント ---
+            const copyAllBtn = document.getElementById('semCopyAll');
+            if (copyAllBtn) {
+                copyAllBtn.addEventListener('click', async () => {
+                    const parts = [];
+                    if (analysis.overall_context) parts.push(`## 📌 Overall Context\n${analysis.overall_context}`);
+                    if (analysis.dichotomy_and_relations) parts.push(`## ⚡ Dichotomy & Relations\n${analysis.dichotomy_and_relations}`);
+                    if (analysis.new_definitions) parts.push(`## 🔬 New Definitions\n${analysis.new_definitions}`);
+                    const md = `# Semantic Intelligence: ${escapeHTML(query)}\n\n` + parts.join('\n\n---\n\n') + `\n\n*Generated by Cognitive Knowledge Engine*`;
+                    try {
+                        await navigator.clipboard.writeText(md);
+                        copyAllBtn.textContent = '✅ コピー済';
+                        setTimeout(() => { copyAllBtn.textContent = '📋 全体コピー'; }, 2000);
+                    } catch(e) { console.error(e); }
+                });
+            }
+
+            // --- 個別セクションコピーボタンのイベント ---
+            llmAnalysisContent.querySelectorAll('.sem-copy-btn').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    const section = btn.closest('.sem-section');
+                    const text = section ? section.dataset.sectionText : '';
+                    if (!text) return;
+                    try {
+                        await navigator.clipboard.writeText(text);
+                        btn.textContent = '✅';
+                        setTimeout(() => { btn.textContent = '📋'; }, 1800);
+                    } catch(e) { console.error(e); }
+                });
+            });
 
         } catch(e) {
-            coOccurringWords.innerHTML = `<span style="color:#f85149; font-size:0.8rem;">Error loading semantic context.</span>`;
+            llmAnalysisContent.innerHTML = `<span style="color:#f85149; font-size:0.8rem;">Error loading semantic context.</span>`;
             console.error(e);
         }
     }
@@ -355,46 +527,55 @@ document.addEventListener('DOMContentLoaded', () => {
             chartInstance.destroy();
         }
 
-        chartInstance = new Chart(ctx, {
-            type: 'polarArea',
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: 'Frequency',
-                    data: counts,
-                    backgroundColor: [
-                        'rgba(88, 166, 255, 0.6)',
-                        'rgba(138, 43, 226, 0.6)',
-                        'rgba(63, 185, 80, 0.6)',
-                        'rgba(240, 136, 62, 0.6)',
-                        'rgba(248, 81, 73, 0.6)',
-                        'rgba(163, 113, 247, 0.6)',
-                        'rgba(47, 129, 247, 0.6)',
-                        'rgba(210, 153, 34, 0.6)',
-                        'rgba(46, 160, 67, 0.6)',
-                        'rgba(255, 123, 114, 0.6)'
-                    ],
-                    borderColor: 'rgba(22, 27, 34, 1)',
-                    borderWidth: 2
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    r: {
-                        ticks: { display: false },
-                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
-                    }
-                },
-                plugins: {
-                    legend: {
-                        position: 'right',
-                        labels: { color: '#848d97', font: { family: "'Outfit', sans-serif" } }
-                    }
-                }
-            }
-        });
+                    chartInstance = new Chart(ctx, {
+                        type: 'polarArea',
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                label: 'Frequency',
+                                data: counts,
+                                backgroundColor: [
+                                    'rgba(88, 166, 255, 0.6)',
+                                    'rgba(138, 43, 226, 0.6)',
+                                    'rgba(63, 185, 80, 0.6)',
+                                    'rgba(240, 136, 62, 0.6)',
+                                    'rgba(248, 81, 73, 0.6)',
+                                    'rgba(163, 113, 247, 0.6)',
+                                    'rgba(47, 129, 247, 0.6)',
+                                    'rgba(210, 153, 34, 0.6)',
+                                    'rgba(46, 160, 67, 0.6)',
+                                    'rgba(255, 123, 114, 0.6)'
+                                ],
+                                borderColor: 'rgba(22, 27, 34, 1)',
+                                borderWidth: 2
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                r: {
+                                    ticks: { display: false },
+                                    grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                                }
+                            },
+                            plugins: {
+                                legend: {
+                                    position: 'right',
+                                    labels: { color: '#848d97', font: { family: "'Outfit', sans-serif" } }
+                                }
+                            },
+                            // 3.3. 統計データからのドリルダウン検索
+                            onClick: (event, elements) => {
+                                if (elements.length > 0) {
+                                    const index = elements[0].index;
+                                    const label = labels[index];
+                                    searchInput.value = label;
+                                    performSearch();
+                                }
+                            }
+                        }
+                    });
     }
 
     function escapeHTML(str) {
@@ -449,10 +630,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 selectedTextInfo = {
                     text: text,
                     element: element,
-                    msgId: messageContainer.dataset.msgid,
-                    convId: messageContainer.dataset.convid,
+                    msgId: messageContainer.dataset.msgid || null,
+                    convId: messageContainer.dataset.convid || null,
                     range: range
                 };
+
+                // デバッグ用: IDが欠落している場合は警告
+                if (!selectedTextInfo.msgId || !selectedTextInfo.convId) {
+                    console.warn("Highlight selection detected but IDs are missing:", selectedTextInfo);
+                }
                 return;
             }
         }
@@ -478,6 +664,17 @@ document.addEventListener('DOMContentLoaded', () => {
         selectedTextInfo = null;
 
         try {
+            // IDが無効な場合は保存を中断
+            if (!savedInfo.msgId || !savedInfo.convId || savedInfo.convId === 'undefined') {
+                highlightPopup.textContent = '❌ エラー: スレッド情報なし';
+                setTimeout(() => {
+                    highlightPopup.style.display = 'none';
+                    highlightPopup.textContent = '🌟 ハイライトとして保存';
+                    highlightPopup.style.pointerEvents = 'auto';
+                }, 2000);
+                return;
+            }
+
             const res = await fetch('/api/highlights', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -562,9 +759,17 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
 
                         return `
-                            <div class="highlight-card">
-                                <div style="margin-bottom: 8px;">"${escapeHTML(h.text_content)}"</div>
+                            <div class="highlight-card" data-msgid="${h.message_id}" data-convid="${h.conversation_id}">
+                                <div class="highlight-content" style="margin-bottom: 8px;">"${escapeHTML(h.text_content)}"</div>
                                 ${tagHtml}
+                                <div class="highlight-actions" style="margin-top: 10px; display: flex; gap: 8px;">
+                                    <button class="highlight-action-btn copy-highlight" title="Copy to clipboard">
+                                        📋 Copy
+                                    </button>
+                                    <button class="highlight-action-btn jump-to-source" title="Open source thread">
+                                        🌐 Open Thread
+                                    </button>
+                                </div>
                             </div>
                         `;
                     }).join('');
@@ -613,6 +818,25 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        // --- 3.4. Recent NLP Highlights: 個別エクスポート (Copy) ---
+        const copyBtn = e.target.closest('.copy-highlight');
+        if (copyBtn) {
+            const card = copyBtn.closest('.highlight-card');
+            copyHighlightToClipboard(card);
+            return;
+        }
+
+        // --- 3.4. Recent NLP Highlights: コンテキスト・ドリルダウン (Open Thread) ---
+        const jumpBtn = e.target.closest('.jump-to-source');
+        if (jumpBtn) {
+            const card = jumpBtn.closest('.highlight-card');
+            const convid = card.dataset.convid;
+            const msgid = card.dataset.msgid;
+            const query = searchInput.value.trim();
+            openThreadModal(convid, msgid, query);
+            return;
+        }
+
         if(!card) return;
         // Ignore if selecting text (for Glasp highlight)
         if(window.getSelection().toString().trim().length > 0) return;
@@ -630,6 +854,16 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     async function openThreadModal(convId, highlightMsgId, query) {
+        if (!convId || convId === 'undefined') {
+            threadModal.style.display = 'flex';
+            modalThreadTitle.textContent = "Error";
+            threadContent.innerHTML = `<div style="color:#ff7b72; padding: 20px; text-align: center;">
+                <p>スレッドIDが無効です。このハイライトにはソーススレッド情報が紐付けられていません。</p>
+                <p style="font-size: 0.7rem; color: var(--text-muted);">ID: ${convId}</p>
+            </div>`;
+            return;
+        }
+
         threadModal.style.display = 'flex';
         modalThreadTitle.textContent = "Loading...";
         modalThreadMeta.textContent = "";
@@ -637,6 +871,8 @@ document.addEventListener('DOMContentLoaded', () => {
         localContextArea.style.display = 'none';
         localContextContent.innerHTML = '';
         currentThreadMessages = [];
+        // triggerLocalAnalysis 内での conversation_id フォールバック用に保存
+        localContextArea.dataset._openedConvId = convId;
 
         try {
             const res = await fetch(`/api/conversations/${convId}?highlight_id=${encodeURIComponent(highlightMsgId)}`);
@@ -795,9 +1031,10 @@ document.addEventListener('DOMContentLoaded', () => {
         localContextArea.style.display = 'block';
 
         // 【設計漏れ修正】分析の起点となったメッセージのIDをエリアに埋め込む
-        // これによりハイライト保存時に「どのメッセージを起点にした分析か」を追跡できる
+        // anchorMsg.conversation_id が未定義の場合は openThreadModal に渡された convId をフォールバックとして使用する
         const anchorMsg = currentThreadMessages[anchorIndex];
-        localContextArea.dataset.convid = anchorMsg.conversation_id;
+        const resolvedConvId = anchorMsg.conversation_id || localContextArea.dataset._openedConvId || "";
+        localContextArea.dataset.convid = resolvedConvId;
         localContextArea.dataset.msgid = anchorMsg.id;
 
         localContextContent.innerHTML = '<span style="color:var(--text-muted)">Analyzing local context via Qwen3...</span>';
@@ -984,5 +1221,40 @@ document.addEventListener('DOMContentLoaded', () => {
                 alert('ファイルの生成中にエラーが発生しました。\n' + err.message);
             }
         });
+    }
+
+    // 3.4. ハイライト個別のコピー機能
+    async function copyHighlightToClipboard(card) {
+        const content = card.querySelector('.highlight-content').textContent.replace(/^"|"$/g, '');
+        const tags = card.querySelector('.tags') ? card.querySelector('.tags').textContent : '';
+        const metaDivs = card.querySelectorAll('div[style*="font-size: 0.75rem"]');
+        let context = '';
+        let intent = '';
+
+        metaDivs.forEach(div => {
+            if (div.textContent.startsWith('Context:')) context = div.textContent;
+            if (div.textContent.startsWith('Intent:')) intent = div.textContent;
+        });
+
+        const copyBtn = card.querySelector('.copy-highlight');
+        const originalText = copyBtn.innerHTML;
+
+        let md = `> ${content}\n\n`;
+        if (tags) md += `- ${tags}\n`;
+        if (context) md += `- ${context}\n`;
+        if (intent) md += `- ${intent}\n`;
+        md += `\n*Source: Cognitive Knowledge Engine*`;
+
+        try {
+            await navigator.clipboard.writeText(md);
+            copyBtn.innerHTML = '✅ Copied!';
+            copyBtn.style.color = '#7ee787';
+            setTimeout(() => {
+                copyBtn.innerHTML = originalText;
+                copyBtn.style.color = '';
+            }, 2000);
+        } catch (err) {
+            console.error('Failed to copy highlight:', err);
+        }
     }
 });

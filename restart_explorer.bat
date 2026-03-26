@@ -63,6 +63,6 @@ echo ===================================================
 echo.
 
 REM lifespan機構によりモデルウォームアップ完了後にリクエスト受付が開始される
-python -m uvicorn src.app:app --reload
+.\venv\Scripts\python.exe -m uvicorn src.app:app --reload
 
 pause
